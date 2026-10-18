@@ -1,0 +1,23 @@
+Arena Mortis — visual revision 2
+
+Weathered stone and sand photographic PBR textures:
+Poly Haven — Old Sandstone 02, Sand 01
+https://polyhaven.com/a/old_sandstone_02
+https://polyhaven.com/a/sand_01
+License: CC0 1.0 Universal. Locally hosted 1K diffuse, OpenGL normal, roughness maps.
+
+Colosseum geometry, firearms, articulated undead models, arms/hands,
+Roman divine artifact, animation system, texture paint, and effects:
+Original project-created assets and code.
+
+Three.js r170: MIT license. See THREE-LICENSE.txt.
+No Call of Duty assets used.
+
+Visual revision 3 — artist-made anatomy:
+Blender Human Base Meshes bundle v1.2.0, realistic male body and realistic hand.
+Blender Studio / contributing artists (male body asset: Dan Ulrich).
+CC0 1.0 Universal.
+Source: https://download.blender.org/demo/asset-bundles/human-base-meshes/human-base-meshes-bundle-v1.2.0.zip
+Converted to indexed mesh buffers; adapted to the existing game skeleton.
+Roman clothing, armor, statue drapery, banners and new architectural details are project-created.
+The supplied combined reference is retained in art-source/reference.png for visual comparison only.
