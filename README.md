@@ -7,7 +7,7 @@ This repository preserves the existing game, including its environment overhaul,
 ## Technology stack
 
 - Browser-native JavaScript ES modules, HTML and CSS.
-- Three.js r170, vendored in `dist/three.js` with its license.
+- Three.js r170, vendored in `dist/three.js` with its license, plus three of its own r170 addons in `dist/addons/` (`GLTFLoader`, `SkeletonUtils`, `BufferGeometryUtils`; import path changed to the local copy, otherwise unmodified).
 - WebGL rendering; Web Audio-generated sound effects.
 - Touch controls for landscape mobile play and keyboard/mouse controls for desktop.
 - Local browser storage for device-local preferences and records.
@@ -42,9 +42,10 @@ node verify.mjs
 node presentation-tests.mjs
 node gameplay-integration.mjs
 node zombie-repair-tests.mjs
+node model-loading-tests.mjs
 ```
 
-The tests check gameplay invariants, the simulated gameplay loop, geometry, skeleton bindings, and deformation. Renderer/audio mocks are used. Passing these checks does not establish rendered appearance, browser compatibility, or mobile frame rate. Verify those separately on actual devices.
+`verify.mjs` and `gameplay-integration.mjs` import the gameplay modules directly (a stand-in renderer is supplied through `globalThis.arenaRendererOverride`, because Node has no WebGL). `model-loading-tests.mjs` generates small glTF models in memory and checks the model pipeline end to end. The tests check gameplay invariants, the simulated gameplay loop, geometry, skeleton bindings, and deformation. Renderer/audio mocks are used. Passing these checks does not establish rendered appearance, browser compatibility, or mobile frame rate. Verify those separately on actual devices.
 
 ## Directory structure
 
@@ -53,7 +54,21 @@ The tests check gameplay invariants, the simulated gameplay loop, geometry, skel
 art-source/                  Reference artwork, offline render, conversion/render scripts
 dist/index.html              Game shell and HUD
 dist/style.css               UI and touch-control styling
-dist/game.js                 Rounds, movement, AI, combat, economy, input and audio
+dist/game.js                 Orchestrator: start/pause/resume/shop flow and the per-frame loop
+dist/state.js                Shared mutable game state (S) and weapon definitions
+dist/world.js                Scene, renderer, camera, first-person groups, arena collision
+dist/combat.js               Shooting, hit detection, damage, recoil, reload, melee, Jupiter's Wrath
+dist/waves.js                Spawning, round progression, enemy AI, round-cleared logic
+dist/economy.js              Altar shop, purchases, upgrades and attachments
+dist/player.js               Movement, sprint/crouch/jump, regeneration, death, camera
+dist/input.js                Keyboard, mouse, pointer lock, touch buttons and joystick
+dist/hud.js                  Announcements and HUD readout
+dist/audio.js                Synthesized sound effects
+dist/util.js                 DOM lookup and clamp helpers
+dist/models.js               External model manifest (pistol, zombies); all urls null by default
+dist/assets.js               glTF/GLB loading, caching and cloning
+dist/model-rigs.js           Adapters that fit loaded models to the game's weapon and zombie rigs
+dist/addons/                 Three.js r170 GLTFLoader, SkeletonUtils, BufferGeometryUtils
 dist/presentation.js         Environment/actor presentation, rigs, weapons and effects
 dist/environment-pass.js     Colosseum visual detail
 dist/reference-details.js    Roman decorative geometry and banner texture
@@ -68,7 +83,18 @@ verify.mjs                   Gameplay invariant checks
 presentation-tests.mjs       Geometry and presentation integration checks
 gameplay-integration.mjs     Simulated full gameplay loop
 zombie-repair-tests.mjs       Zombie skinning/animation regression checks
+model-loading-tests.mjs       glTF loading, fallback, retargeting and in-game use
 ```
+
+## External models (glTF / GLB)
+
+The pistol and the zombies can be replaced by `.glb` or `.gltf` files without touching game code. Put the files in `dist/` (for example `dist/models/`) and set their `url` in `dist/models.js`; the comments there list every option. The game must be served over HTTP for loading to work.
+
+- Nothing is fetched while every `url` is `null`, so the default game is unchanged.
+- A missing or broken file logs a warning and that slot keeps its procedural model.
+- Models load in the background. Zombies spawned before a model finishes use the procedural body; the pistol swaps in as soon as it is ready.
+- Zombies are scaled to 1.8 m and stood on the ground, and they use the existing hit zones and AI. A model is animated by its own walk/run/attack/idle/death clips when it has them, otherwise by the game's procedural animation retargeted onto a humanoid skeleton (Mixamo- and Blender-style bone names are detected), otherwise as a rigid body that still topples on death.
+- Pistol nodes named `slide` and `magazine` are driven by the existing recoil and reload animation; an empty node named `muzzle` places the muzzle flash.
 
 ## Known limitations and retained history
 

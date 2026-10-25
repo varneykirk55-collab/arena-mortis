@@ -1,67 +1,73 @@
-import * as T from './three.js';
-import {createPresentation} from './presentation.js';
-const $=id=>document.getElementById(id),clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
-const scene=new T.Scene();scene.background=new T.Color(0x827466);scene.fog=new T.FogExp2(0xb0a08a,.012);
-const renderer=new T.WebGLRenderer({canvas:$('world'),antialias:!matchMedia('(pointer:coarse)').matches,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;
-const camera=new T.PerspectiveCamera(72,innerWidth/innerHeight,.05,220);camera.rotation.order='YXZ';scene.add(camera);
-const mats={};function mat(c,metal=0,rough=.9){const k=c+','+metal+','+rough;return mats[k]??=(new T.MeshStandardMaterial({color:c,metalness:metal,roughness:rough}));}
-const boxG=new T.BoxGeometry(1,1,1),sphereG=new T.SphereGeometry(1,8,6),cylG=new T.CylinderGeometry(1,1,1,12);
-function box(p,x,y,z,w,h,d,m){let o=new T.Mesh(boxG,m);o.position.set(x,y,z);o.scale.set(w,h,d);p.add(o);return o}
-function cylinder(p,x,y,z,r,h,m){let o=new T.Mesh(cylG,m);o.position.set(x,y,z);o.scale.set(r,h,r);p.add(o);return o}
-function sphere(p,x,y,z,r,m){let o=new T.Mesh(sphereG,m);o.position.set(x,y,z);o.scale.setScalar(r);p.add(o);return o}
-const visual=createPresentation(scene,camera,renderer);
-const {gates,obstacles,altar}=visual;
-const {stone,gold,iron,red,skin,cloth,dark}=visual.materials;
-const altarGlow=visual.glow;
-let graphicsLevel=localStorage.getItem('arenaGraphics')||(matchMedia('(pointer:coarse)').matches?'balanced':'high');
-let enemyLimit=visual.graphics(graphicsLevel);
-let audio,muted=false;function sound(type){if(muted||!audio)return;let now=audio.currentTime,buf=audio.createBuffer(1,audio.sampleRate*(type==='thunder'?2:.3),audio.sampleRate),d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*Math.exp(-i/d.length*(type==='thunder'?2:9));let src=audio.createBufferSource();src.buffer=buf;let filter=audio.createBiquadFilter();filter.type='lowpass';filter.frequency.value=({shot:2200,eagle:1700,shotgun:1100,thunder:280,hit:650,step:220,reload:2800,growl:120})[type]||700;let gain=audio.createGain();gain.gain.value=({shot:.21,eagle:.35,shotgun:.4,thunder:.8,hit:.13,step:.05,reload:.12,growl:.18})[type]||.13;src.connect(filter).connect(gain).connect(audio.destination);src.start(now)}
-function tone(freq,duration=.25){if(!audio||muted)return;let o=audio.createOscillator(),g=audio.createGain();o.frequency.value=freq;o.type='sine';g.gain.setValueAtTime(.07,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);o.connect(g).connect(audio.destination);o.start();o.stop(audio.currentTime+duration)}
-const defs=[{name:'Desert Eagle',cap:7,reserve:56,damage:52,rate:.32,reload:1.9,price:0},{name:'M4A1',cap:30,reserve:180,damage:25,rate:.095,reload:2,price:1500},{name:'Gallo',cap:8,reserve:48,damage:22,rate:.48,reload:2.6,price:2200}];
-let guns,selected=0,round=0,points=500,score=0,kills=0,health=100,mode='menu',enemies=[],fx=[],remainingSpawn=0,spawnClock=0,roundWait=0,wrathReady=true,wrathUp=false,charging=false,charge=0,lastDamage=-20,time=0,fireHeld=false,ads=false,crouching=false,sprinting=false,reloadLeft=0,shotClock=0,recoil=0,walk=0,jumpY=0,jumpV=0,announceUntil=0,hitUntil=0,nextGroan=0;
-const pos=new T.Vector3(0,0,12);let yaw=0,pitch=0;const keys={},stick={x:0,y:0};
-function initGuns(){guns=defs.map((d,i)=>({...d,owned:i===0,ammo:d.cap,stock:d.reserve,up:false,attachments:{}}))}initGuns();
-const hand=new T.Group();camera.add(hand);const gunGroup=new T.Group();hand.add(gunGroup);const flash=new T.Mesh(new T.ConeGeometry(.12,.55,6),new T.MeshBasicMaterial({color:0xffcf73}));flash.rotation.x=-Math.PI/2;flash.visible=false;hand.add(flash);
-function gunModel(){const v=visual.makeGun(gunGroup,guns[selected],selected);flash.position.set(0,0,v.muzzle);}gunModel();
-function zombie(variant){const rig=visual.makeZombie(variant);scene.add(rig.group);let gate=gates[Math.floor(Math.random()*gates.length)];rig.group.position.copy(gate);rig.group.position.x+=(Math.random()-.5)*2;rig.group.position.z+=(Math.random()-.5)*2;if(variant===3)rig.group.scale.setScalar(1.25);const hp=(85+round*16)*(variant===3?3:variant===2?1.7:1);return {...rig,hp,maxHp:hp,speed:(1.05+Math.min(round*.095,1.5))*(variant===1?1.45:variant===3?.8:1),phase:Math.random()*6,attack:0,stagger:0,dead:false,death:0,variant};}
-function nextRound(){round++;wrathReady=true;remainingSpawn=6+Math.floor(round*3.5);spawnClock=0;roundWait=0;announce('ROUND '+round);tone(180,.7);setTimeout(()=>tone(270,.8),250)}
-function announce(msg){$('announcement').textContent=msg;announceUntil=time+3}
-function damage(e,amount,head=false){if(e.dead)return;e.hp-=amount;e.stagger=.16;e.lastHead=head;points+=10;score+=10;hitUntil=time+.12;$('hit').textContent=head?'×':'⌁';if(e.hp<=0){e.dead=true;e.death=0;kills++;let reward=head?150:100;points+=reward;score+=reward;sound('hit');if(head)tone(1100,.08)}}
-function burst(at,color=0xe7b058,n=12,size=.08){for(let i=0;i<n;i++){let o=sphere(scene,at.x,at.y,at.z,size,new T.MeshBasicMaterial({color}));fx.push({o,v:new T.Vector3((Math.random()-.5)*7,Math.random()*5,(Math.random()-.5)*7),life:.45,max:.45})}}
-const ray=new T.Raycaster();function cast(dx=0,dy=0){ray.setFromCamera(new T.Vector2(dx,dy),camera);let best=null,dist=80;for(let e of enemies){if(e.dead)continue;let center=e.group.position.clone();center.y=1.15;let closest=ray.ray.closestPointToPoint(center,new T.Vector3());let t=closest.distanceTo(camera.position);let local=closest.clone().sub(center);if(t<dist&&ray.ray.direction.dot(center.clone().sub(camera.position))>0&&Math.abs(local.x)<.55&&Math.abs(local.z)<.55&&closest.y>.05&&closest.y<(e.variant===3?2.65:2.2)){best={e,head:closest.y>(e.variant===3?2:1.65),at:closest};dist=t}}return best}
-function fire(){if(mode!=='play'||reloadLeft>0||shotClock>0||charging)return;let g=guns[selected];if(g.ammo<=0){reload();return}g.ammo--;shotClock=g.rate;recoil+=g.attachments.grip?.025:selected===0?.08:.04;sound(selected===0?'eagle':selected===1?'shot':'shotgun');visual.shoot(hand,selected);let pellets=selected===2?8:1;for(let i=0;i<pellets;i++){let spread=selected===2?.065:ads?.002:.014;let h=cast((Math.random()-.5)*spread,(Math.random()-.5)*spread);if(h){damage(h.e,g.damage*(g.up?2:1)*(h.head?2.5:1),h.head);visual.impact(h.at,true);if(g.up&&selected===0)explode(h.at,3.6,180);if(g.up&&selected===1){for(let e of enemies)if(e!==h.e&&!e.dead&&e.group.position.distanceTo(h.e.group.position)<3)damage(e,22)}if(g.up&&selected===2){h.e.stagger=.75;h.e.group.position.add(h.e.group.position.clone().sub(pos).normalize().multiplyScalar(.45))}}else if(g.up&&selected===0){let at=targetPoint();explode(at,3.6,180)}else{visual.impact(targetPoint(),false)}}}
+// Arena Mortis orchestrator: game flow (start/pause/resume/shop) and the per-frame loop.
+// Gameplay lives in the modules below; this file only wires them together.
+import {S,pos,keys,stick,initGuns} from './state.js';
+import {$} from './util.js';
+import {scene,renderer,camera,visual,hand,gunGroup,artifact,targetRing,resize} from './world.js';
+import {ensureAudio} from './audio.js';
+import {updateHud,showBest} from './hud.js';
+import {gunModel,updateWeapons,updateEffects} from './combat.js';
+import {nextRound,updateSpawning,updateEnemies,updateRoundFlow} from './waves.js';
+import {updateMovement,updateCamera,isMoving} from './player.js';
+import {bindInput,lock} from './input.js';
+import {MODELS} from './models.js';
+import {preloadModels,instantiate} from './assets.js';
 
-function explode(at,r,dmg){visual.explosion(at);for(let e of enemies)if(!e.dead&&e.group.position.distanceTo(at)<r)damage(e,dmg);sound('shotgun')}
-function reload(){let g=guns[selected];if(mode!=='play'||reloadLeft||g.ammo>=g.cap||!g.stock||charging)return;reloadLeft=g.reload+(g.up&&selected===0?.5:0);visual.reload(reloadLeft);sound('reload');announce('RELOADING')}
-function switchGun(){if(charging)return;selected=(selected+1)%3;while(!guns[selected].owned)selected=(selected+1)%3;reloadLeft=0;gunModel()}
-function targetPoint(){let dir=new T.Vector3();camera.getWorldDirection(dir);let d=dir.y<-.04?clamp(-camera.position.y/dir.y,4,26):20;let at=pos.clone().add(dir.multiplyScalar(d));at.y=.08;let len=Math.hypot(at.x,at.z);if(len>31){at.x*=31/len;at.z*=31/len}return at}
-const targetRing=new T.Mesh(new T.RingGeometry(5.8,6,48),new T.MeshBasicMaterial({color:0x80dfff,transparent:true,opacity:.32,side:T.DoubleSide}));targetRing.rotation.x=-Math.PI/2;targetRing.visible=false;scene.add(targetRing);
-function chargeStart(){if(mode!=='play'||!wrathReady||charging)return;charging=true;charge=0;fireHeld=false;reloadLeft=0;tone(75,1);gunGroup.visible=false;artifact.visible=true}
-function chargeEnd(){if(!charging)return;charging=false;wrathReady=false;artifact.visible=false;gunGroup.visible=true;targetRing.visible=false;let at=targetPoint(),radius=wrathUp?10:7;for(let e of enemies)if(!e.dead&&e.group.position.distanceTo(at)<radius)damage(e,100000);sound('thunder');visual.strike(at,radius);announce('JUPITER HAS SPOKEN');recoil=.25}
-const artifact=new T.Group();hand.add(artifact);artifact.visible=false;visual.makeArtifact(artifact);
-function melee(){if(mode!=='play')return;visual.melee();recoil=.18;for(let e of enemies)if(!e.dead&&e.group.position.distanceTo(pos)<2.6)damage(e,65);sound('hit')}
-function moveCollide(p,dx,dz,r=.45){p.x+=dx;p.z+=dz;let len=Math.hypot(p.x,p.z);if(len>31.6-r){p.x*= (31.6-r)/len;p.z*= (31.6-r)/len}for(let o of obstacles){let x=p.x-o.x,z=p.z-o.z,d=Math.hypot(x,z);if(d<o.r+r&&d>.001){p.x=o.x+x/d*(o.r+r);p.z=o.z+z/d*(o.r+r)}}}
-function die(){mode='dead';charging=false;targetRing.visible=false;document.exitPointerLock?.();$('dead').classList.remove('hidden');$('result').textContent=`Survived to round ${round} · ${kills} kills · ${score.toLocaleString()} points`;let best=Number(localStorage.getItem('arenaBest')||0);if(score>best)localStorage.setItem('arenaBest',score)}
-function start(){visual.reset();audio??=new (window.AudioContext||window.webkitAudioContext)();audio.resume();for(let e of enemies){scene.remove(e.group);visual.disposeActor(e)}enemies=[];for(let f of fx)scene.remove(f.o);fx=[];initGuns();selected=0;round=0;points=500;score=0;kills=0;health=100;pos.set(0,0,12);yaw=0;pitch=0;reloadLeft=0;shotClock=0;lastDamage=time-20;wrathUp=false;charging=false;artifact.visible=false;gunGroup.visible=true;targetRing.visible=false;jumpY=jumpV=0;gunModel();for(let id of ['menu','dead','paused','shop'])$(id).classList.add('hidden');mode='play';nextRound();lock();}
-function lock(){if(!matchMedia('(pointer:coarse)').matches)renderer.domElement.requestPointerLock?.()?.catch?.(()=>announce('CLICK THE ARENA TO CAPTURE YOUR MOUSE'));else{document.documentElement.requestFullscreen?.().catch(()=>{});screen.orientation?.lock?.('landscape').catch(()=>{})}}
-function pause(){if(mode!=='play')return;for(let k in keys)keys[k]=false;stick.x=stick.y=0;ads=false;mode='paused';fireHeld=false;charging=false;targetRing.visible=false;artifact.visible=false;gunGroup.visible=true;document.exitPointerLock?.();$('paused').classList.remove('hidden')}
-function resume(){mode='play';$('paused').classList.add('hidden');lock()}
-function openShop(){if(mode!=='play'||pos.distanceTo(altar.position)>5){announce('FIND THE BLUE ALTAR AT THE NORTH GATE');return}mode='shop';fireHeld=false;document.exitPointerLock?.();$('shop').classList.remove('hidden');renderShop()}
-function purchase(cost,fn){if(points<cost)return;points-=cost;fn();tone(640,.15);renderShop();gunModel()}
-function renderShop(){let g=guns[selected];$('balance').textContent=`${points.toLocaleString()} denarii · Equipped: ${g.name} · Time pauses at the altar`;$('shopItems').innerHTML='';const item=(title,desc,cost,fn,disabled=false)=>{let b=document.createElement('button');b.innerHTML=title+' <strong>'+(cost?cost.toLocaleString():'')+'</strong><small>'+desc+'</small>';b.disabled=disabled||points<cost;b.onclick=()=>purchase(cost,fn);$('shopItems').append(b)};for(let [i,w] of guns.entries())item(w.name,w.owned?'Equip weapon':'Purchase with full ammunition',w.owned?0:w.price,()=>{w.owned=true;selected=i;reloadLeft=0});item('Resupply','Refill reserve ammunition for equipped weapon',300,()=>g.stock=g.reserve);item(g.up?'ASCENDED':'Vulcan’s Ascension',selected===0?'Explosive rounds • no self-damage':selected===1?'Arc rounds chain to nearby enemies':'Thunder shells • stronger pellets and knockback',5000,()=>{g.up=true;g.ammo=g.cap;g.stock=g.reserve},g.up);item('Jupiter: Storm Dominion','Wider strike radius • still one charge per round',4000,()=>wrathUp=true,wrathUp);for(let [key,label,desc,cost] of [['optic','Optic','Tighter aim and stronger zoom',600],['magazine','Extended magazine','50% more rounds per magazine',800],['grip','Grip / stock','Reduced recoil and steady handling',650],['muzzle',selected===2?'Long barrel':'Muzzle assembly','20% higher damage',900]])item(label,desc,cost,()=>{g.attachments[key]=true;if(key==='magazine'){g.cap=Math.ceil(g.cap*1.5);g.ammo=g.cap}if(key==='muzzle')g.damage*=1.2},g.attachments[key]);}
-$('start').onclick=start;$('restart').onclick=start;$('pause').onclick=pause;$('resume').onclick=resume;$('sound').onclick=()=>{muted=!muted;$('sound').textContent=muted?'SOUND OFF':'SOUND ON'};$('closeShop').onclick=()=>{$('shop').classList.add('hidden');mode='play';lock()};$('best').textContent=localStorage.getItem('arenaBest')?'PERSONAL BEST  '+Number(localStorage.getItem('arenaBest')).toLocaleString():'';
-window.addEventListener('keydown',e=>{if(['Space','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault();keys[e.code]=true;if(e.repeat)return;if(e.code==='Escape'){if(mode==='play')pause();else if(mode==='paused')resume()}if(mode!=='play')return;if(e.code==='KeyR')reload();if(e.code==='KeyQ')switchGun();if(e.code==='KeyF')chargeStart();if(e.code==='KeyV')melee();if(e.code==='KeyE')openShop();if(e.code==='Space'&&jumpY===0)jumpV=5.5;if(e.code==='KeyC')crouching=!crouching});window.addEventListener('keyup',e=>{keys[e.code]=false;if(e.code==='KeyF')chargeEnd()});window.addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement&&!matchMedia('(pointer:coarse)').matches&&mode==='play')pause()});
-window.addEventListener('mousemove',e=>{if(document.pointerLockElement&&mode==='play'){yaw-=e.movementX*.0022;pitch=clamp(pitch-e.movementY*.0022,-1.35,1.35)}});$('world').addEventListener('mousedown',e=>{if(mode!=='play')return;if(e.button===0){fireHeld=true;fire()}if(e.button===2)ads=true});window.addEventListener('mouseup',e=>{if(e.button===0)fireHeld=false;if(e.button===2)ads=false});window.addEventListener('contextmenu',e=>e.preventDefault());
-function press(id,down,up=()=>{}){$(id).addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();$(id).setPointerCapture(e.pointerId);down()});for(let ev of ['pointerup','pointercancel'])$(id).addEventListener(ev,e=>{e.preventDefault();up()})}press('fire',()=>{fireHeld=true;fire()},()=>fireHeld=false);press('ads',()=>ads=!ads);press('reload',reload);press('jump',()=>{if(!jumpY)jumpV=5.5});press('crouch',()=>crouching=!crouching);press('switch',switchGun);press('wrath',chargeStart,chargeEnd);press('sprint',()=>sprinting=!sprinting);press('interact',openShop);press('melee',melee);
-let joyId=null,lookId=null,lx=0,ly=0;const joy=$('joystick');joy.onpointerdown=e=>{joyId=e.pointerId;joy.setPointerCapture(joyId);joyMove(e)};function joyMove(e){if(e.pointerId!==joyId)return;let r=joy.getBoundingClientRect(),x=(e.clientX-r.left-r.width/2)/40,y=(e.clientY-r.top-r.height/2)/40,len=Math.max(1,Math.hypot(x,y));stick.x=x/len;stick.y=y/len;joy.firstElementChild.style.transform=`translate(${stick.x*32}px,${stick.y*32}px)`}joy.onpointermove=joyMove;joy.onpointerup=joy.onpointercancel=()=>{joyId=null;stick.x=stick.y=0;joy.firstElementChild.style.transform=''};$('world').onpointerdown=e=>{if(e.pointerType==='mouse'||mode!=='play')return;lookId=e.pointerId;lx=e.clientX;ly=e.clientY;$('world').setPointerCapture(lookId)};$('world').onpointermove=e=>{if(e.pointerId!==lookId)return;yaw-=(e.clientX-lx)*.005;pitch=clamp(pitch-(e.clientY-ly)*.005,-1.35,1.35);lx=e.clientX;ly=e.clientY};$('world').onpointerup=$('world').onpointercancel=()=>lookId=null;
-function update(dt){time+=dt;shotClock=Math.max(0,shotClock-dt);recoil*=Math.exp(-dt*13);if(reloadLeft>0){reloadLeft-=dt;if(reloadLeft<=0){let g=guns[selected],n=Math.min(g.cap-g.ammo,g.stock);g.ammo+=n;g.stock-=n;sound('reload')}}if(fireHeld){if(selected===1)fire();else if(shotClock===0){fire();fireHeld=false}}if(charging){charge+=dt;targetRing.visible=true;targetRing.position.copy(targetPoint());targetRing.scale.setScalar((wrathUp?10:7)/6);artifact.rotation.z=Math.sin(time*30)*.03;altarGlow.emissiveIntensity=2+Math.sin(time*22)}
-let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+stick.x,mz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-stick.y,len=Math.max(1,Math.hypot(mx,mz)),speed=crouching?2.2:ads?2.8:keys.ShiftLeft||sprinting?7.2:4.5;mx/=len;mz/=len;moveCollide(pos,(mx*Math.cos(yaw)-mz*Math.sin(yaw))*speed*dt,(-mx*Math.sin(yaw)-mz*Math.cos(yaw))*speed*dt);if(Math.abs(mx)+Math.abs(mz)>.1){walk+=dt*speed;if(Math.floor(walk*2)!==Math.floor((walk-dt*speed)*2)&&jumpY===0)sound('step')}if(jumpV||jumpY){jumpV-=15*dt;jumpY=Math.max(0,jumpY+jumpV*dt);if(!jumpY)jumpV=0}if(time-lastDamage>5&&health<100)health=Math.min(100,health+dt*8);
-spawnClock-=dt;if(remainingSpawn>0&&spawnClock<=0&&enemies.filter(e=>!e.dead).length<enemyLimit){let variant=round>=8&&remainingSpawn%13===0?3:round>=5&&Math.random()<.3?2:round>=3&&Math.random()<.3?1:0;enemies.push(zombie(variant));remainingSpawn--;spawnClock=Math.max(.25,1.1-round*.055)}
-let living=0;for(let i=enemies.length-1;i>=0;i--){let e=enemies[i];if(e.dead){e.death+=dt;visual.animateDeath(e);if(e.death>2.5){scene.remove(e.group);visual.disposeActor(e);enemies.splice(i,1)}continue}living++;e.attack-=dt;e.stagger-=dt;let x=pos.x-e.group.position.x,z=pos.z-e.group.position.z,d=Math.hypot(x,z);let desired=Math.atan2(-x,-z);e.group.rotation.y+=Math.atan2(Math.sin(desired-e.group.rotation.y),Math.cos(desired-e.group.rotation.y))*Math.min(1,dt*7);if(d>1.2&&e.stagger<=0){let vx=x/d,vz=z/d;for(let o of obstacles){let ox=e.group.position.x-o.x,oz=e.group.position.z-o.z,od=Math.hypot(ox,oz);if(od<o.r+2){vx+=ox/Math.max(.1,od)*1.7;vz+=oz/Math.max(.1,od)*1.7}}for(let j=0;j<enemies.length;j++){let other=enemies[j];if(other===e||other.dead)continue;let dx=e.group.position.x-other.group.position.x,dz=e.group.position.z-other.group.position.z,dd=dx*dx+dz*dz;if(dd<.8&&dd>.001){vx+=dx/(dd+.1)*.25;vz+=dz/(dd+.1)*.25}}let vl=Math.max(1,Math.hypot(vx,vz));moveCollide(e.group.position,vx/vl*e.speed*dt,vz/vl*e.speed*dt,.35)}e.phase+=dt*e.speed*3;visual.animateZombie(e,dt,d,e.phase);if(d<1.65&&e.attack<=0&&jumpY<1){health-=e.variant===3?35:18;e.attack=1.1;lastDamage=time;sound('hit');if(health<=0){health=0;die();return}}}
-if(!living&&!remainingSpawn){if(!roundWait){roundWait=6;points+=250;score+=250;announce('ROUND CLEARED · +250')}roundWait-=dt;if(roundWait<=0)nextRound()}if(time>nextGroan&&living){sound('growl');nextGroan=time+3+Math.random()*3}
-$('remaining').textContent=roundWait?`NEXT WAVE IN ${Math.ceil(roundWait)}`:`${living+remainingSpawn} REMAINING`;$('round').textContent=round;$('points').textContent=points.toLocaleString();$('health').textContent=Math.ceil(health);$('healthbar').style.width=health+'%';let g=guns[selected];$('weapon').textContent=(g.up?'ASCENDED · ':'')+g.name.toUpperCase();$('ammo').innerHTML=(reloadLeft>0?'—':g.ammo)+' <em>/ '+g.stock+'</em>';$('wrathStatus').textContent=charging?'ϟ RELEASE TO CALL THE STORM':wrathReady?'ϟ JUPITER READY':'ϟ USED · RECHARGES NEXT ROUND';$('prompt').textContent=pos.distanceTo(altar.position)<5?'FORGE OF VULCAN · E / ALTAR TO BUY & UPGRADE':'';$('hit').style.opacity=time<hitUntil?1:0;$('announcement').style.opacity=time<announceUntil?1:0;$('vignette').style.boxShadow=time-lastDamage<.5?'inset 0 0 130px #ae1818bb':'inset 0 0 140px #0006';
+// External models (models.js) replace procedural ones once loaded; until then, or if loading fails,
+// the procedural pistol and zombies are used. Nothing is fetched while every url is null.
+visual.setModelProvider(instantiate);
+preloadModels(MODELS).then(({loaded})=>{if(loaded.includes('pistol')&&S.selected===0)gunModel()});
+
+gunModel();
+
+export function start(){
+ visual.reset();ensureAudio();
+ for(let e of S.enemies){scene.remove(e.group);visual.disposeActor(e)}S.enemies=[];
+ for(let f of S.fx)scene.remove(f.o);S.fx=[];
+ initGuns();S.selected=0;S.round=0;S.points=500;S.score=0;S.kills=0;S.health=100;
+ pos.set(0,0,12);S.yaw=0;S.pitch=0;S.reloadLeft=0;S.shotClock=0;S.lastDamage=S.time-20;S.wrathUp=false;S.charging=false;
+ artifact.visible=false;gunGroup.visible=true;targetRing.visible=false;S.jumpY=S.jumpV=0;gunModel();
+ for(let id of ['menu','dead','paused','shop'])$(id).classList.add('hidden');
+ S.mode='play';nextRound();lock();
 }
-function render(dt){if(mode==='play')update(dt);if(mode==='menu'){camera.position.set(8,2.4,19);camera.lookAt(-8,9,-22);camera.rotation.y+=Math.sin(performance.now()*.00012)*.1}else{camera.position.set(pos.x,(crouching?1.05:1.7)+jumpY+Math.sin(walk*2)*.035,pos.z);camera.rotation.set(pitch+recoil,yaw,0);camera.fov=T.MathUtils.lerp(camera.fov,ads?(guns[selected].attachments.optic?43:53):72,Math.min(1,dt*12));camera.updateProjectionMatrix()}const moving=!!(keys.KeyW||keys.KeyA||keys.KeyS||keys.KeyD||Math.abs(stick.x)+Math.abs(stick.y)>.1);const vState={mode,moving,running:moving&&(keys.ShiftLeft||sprinting),ads,recoil,walk,time,reload:reloadLeft,charging,charge,artifact,pos};hand.visible=mode!=='menu';visual.animateWeapon(hand,vState,mode==='play'?dt:0);visual.tick(mode==='play'||mode==='menu'?dt:0,vState);if(mode==='play')for(let i=fx.length-1;i>=0;i--){let f=fx[i];f.life-=dt;if(f.v){f.v.y-=dt*9;f.o.position.addScaledVector(f.v,dt);f.o.rotation.x+=dt*5}if(f.o.material?.transparent)f.o.material.opacity=Math.max(0,f.life/f.max)*.55;if(f.life<=0){scene.remove(f.o);if(f.o.isLine)f.o.geometry.dispose();fx.splice(i,1)}}renderer.render(scene,camera);$('performance').textContent=graphicsLevel.toUpperCase()+' · '+Math.round(1000/frameMs)+' FPS';}
-function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix()}window.onresize=resize;resize();let last=performance.now(),frameMs=16.7;renderer.setAnimationLoop(now=>{const elapsed=now-last;frameMs=frameMs*.9+elapsed*.1;let dt=Math.min(.04,elapsed/1000);last=now;render(dt)});
 
-$('graphics').value=graphicsLevel;$('graphics').onchange=e=>{graphicsLevel=e.target.value;enemyLimit=visual.graphics(graphicsLevel);resize()};
+export function pause(){
+ if(S.mode!=='play')return;
+ for(let k in keys)keys[k]=false;stick.x=stick.y=0;S.ads=false;S.mode='paused';S.fireHeld=false;S.charging=false;
+ targetRing.visible=false;artifact.visible=false;gunGroup.visible=true;document.exitPointerLock?.();$('paused').classList.remove('hidden');
+}
+
+export function resume(){S.mode='play';$('paused').classList.add('hidden');lock()}
+
+export function closeShop(){$('shop').classList.add('hidden');S.mode='play';lock()}
+
+export function update(dt){
+ S.time+=dt;
+ updateWeapons(dt);
+ updateMovement(dt);
+ updateSpawning(dt);
+ const living=updateEnemies(dt);
+ if(living<0)return; // player died this frame
+ updateRoundFlow(dt,living);
+ updateHud(living);
+}
+
+let last=performance.now(),frameMs=16.7;
+
+export function render(dt){
+ if(S.mode==='play')update(dt);
+ updateCamera(dt);
+ const moving=isMoving();
+ const vState={mode:S.mode,moving,running:moving&&(keys.ShiftLeft||S.sprinting),ads:S.ads,recoil:S.recoil,walk:S.walk,time:S.time,reload:S.reloadLeft,charging:S.charging,charge:S.charge,artifact,pos};
+ hand.visible=S.mode!=='menu';
+ visual.animateWeapon(hand,vState,S.mode==='play'?dt:0);
+ visual.tick(S.mode==='play'||S.mode==='menu'?dt:0,vState);
+ if(S.mode==='play')updateEffects(dt);
+ renderer.render(scene,camera);
+ $('performance').textContent=S.graphicsLevel.toUpperCase()+' · '+Math.round(1000/frameMs)+' FPS';
+}
+
+bindInput({start,pause,resume,closeShop});
+showBest();
+
+window.onresize=resize;resize();
+renderer.setAnimationLoop(now=>{const elapsed=now-last;frameMs=frameMs*.9+elapsed*.1;let dt=Math.min(.04,elapsed/1000);last=now;render(dt)});
